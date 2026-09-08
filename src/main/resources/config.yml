@@ -1,0 +1,170 @@
+# TitanHub supports Bukkit, Spigot and Paper from 1.8.8 onward.
+settings:
+  spawn-on-join: true
+  hub-command:
+    enabled: true
+    cooldown-seconds: 3
+  clear-inventory-on-join: true
+  prevent-damage: true
+  prevent-hunger-loss: true
+  prevent-item-drop: true
+  prevent-block-break: true
+  prevent-block-place: true
+  prevent-interactions: true
+  prevent-weather: true
+  scoreboard:
+    enabled: true
+    title: '&8[&bTitan&3Hub&8]'
+    lines:
+      - '&8&m----------------'
+      - '&7Giocatore'
+      - '&f%player%'
+      - '&r'
+      - '&7Online: &b%online%'
+      - '&r&r'
+      - '&etitanhub.example'
+      - '&8&m----------------'
+  tab:
+    enabled: true
+    header:
+      - ''
+      - '&8&m--------------------------'
+      - '&bTitanHub'
+      - '&7Benvenuto, &f%player%'
+      - '&8&m--------------------------'
+      - ''
+    footer:
+      - ''
+      - '&8&m--------------------------'
+      - '&7Giocatori online: &b%online%'
+      - '&etitanhub.example'
+      - '&8&m--------------------------'
+      - ''
+
+# Set with /sethub. The complete world containing this location is protected by TitanHub.
+hub-location: {}
+
+double-jump:
+  enabled: true
+  strength: 1.1
+  sound: BAT_TAKEOFF
+
+launch-pads:
+  enabled: true
+  material: GOLD_PLATE
+  strength: 1.5
+  vertical-boost: 1.0
+  sound: BAT_TAKEOFF
+
+items:
+  navigator:
+    enabled: true
+    slot: 4
+    material: COMPASS
+    name: '&bSelettore modalita &7(Clic destro)'
+    lore:
+      - '&7Scegli una destinazione.'
+  player-hider:
+    enabled: true
+    slot: 0
+    cooldown-seconds: 3
+    visible-material: INK_SACK
+    hidden-material: REDSTONE
+    name: '&eGiocatori &7(Clic destro)'
+    lore:
+      - '&7Clicca per mostrare o nascondere'
+      - '&7gli altri giocatori.'
+  pvp:
+    enabled: true
+    slot: 1
+    material: IRON_SWORD
+    name: '&cPvP &7(Tieni in mano)'
+    lore:
+      - '&7Attiva il PvP dopo 3 secondi.'
+  profile:
+    enabled: false
+    slot: 8
+    material: PLAYER_HEAD
+    name: '&aIl tuo profilo &7(Clic destro)'
+    lore:
+      - '&7Visualizza le tue informazioni.'
+  enderbutt:
+    enabled: true
+    slot: 8
+    material: ENDER_PEARL
+    name: '&5Enderbutt &7(Clic destro)'
+    lore:
+      - '&7Lanciati nella direzione'
+      - '&7in cui stai guardando.'
+
+enderbutt:
+  enabled: true
+  strength: 1.35
+  vertical-boost: 0.55
+  cooldown-millis: 350
+  sound: ENDERMAN_TELEPORT
+
+navigator:
+  title: '&8Selettore modalita'
+  size: 27
+  decoration:
+    enabled: true
+    # CYAN_STAINED_GLASS_PANE is converted to STAINED_GLASS_PANE on 1.8.8.
+    material: CYAN_STAINED_GLASS_PANE
+    data: 9
+    name: '&r '
+    lore: []
+    slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
+  destinations:
+    survival:
+      slot: 12
+      material: PLAYER_HEAD
+      head-owner: MHF_Pig
+      name: '&aSurvival'
+      lore:
+        - '&7Gioca nel mondo survival.'
+        - ''
+        - '&eClicca per entrare!'
+      action: SERVER
+      value: survival
+    creative:
+      slot: 14
+      material: PLAYER_HEAD
+      head-owner: MHF_Cake
+      name: '&dCreative'
+      lore:
+        - '&7Costruisci senza limiti.'
+        - ''
+        - '&eClicca per entrare!'
+      action: SERVER
+      value: creative
+
+# All entries in this menu are configurable. Available placeholders: %player%,
+# %online%, %playtime% and PlaceholderAPI placeholders when it is installed.
+profile-menu:
+  title: '&8Profilo: %player%'
+  size: 27
+  playtime:
+    slot: 10
+    material: CLOCK
+    name: '&bTempo di gioco'
+    lore:
+      - '&7%playtime%'
+  first-join:
+    slot: 12
+    material: PLAYER_HEAD
+    name: '&aPrimo accesso'
+    lore:
+      - '&7%first-join%'
+  last-join:
+    slot: 14
+    material: BOOK
+    name: '&eUltimo accesso'
+    lore:
+      - '&7%last-join%'
+  online:
+    slot: 16
+    material: NETHER_STAR
+    name: '&dOnline'
+    lore:
+      - '&7Player connessi: &f%online%'
