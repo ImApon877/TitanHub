@@ -1,0 +1,22 @@
+name: TitanHub
+version: 1.0.0
+main: me.imapon.titanhub.TitanHub
+author: Im_Apon
+description: Configurable cross-version hub core.
+softdepend: [PlaceholderAPI]
+commands:
+  titanhub:
+    description: Reload TitanHub configuration.
+    usage: /titanhub reload
+    permission: titanhub.admin
+  hub:
+    description: Teleport to the hub spawn.
+    usage: /hub
+  sethub:
+    description: Set the hub location and protected hub world.
+    usage: /sethub
+    permission: titanhub.admin
+permissions:
+  titanhub.admin:
+    description: Allows TitanHub administration and hub protection bypass.
+    default: op
