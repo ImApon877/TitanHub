@@ -5,7 +5,7 @@
 
     <groupId>me.imapon</groupId>
     <artifactId>titan-hub</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <name>TitanHub</name>
 
     <properties>
