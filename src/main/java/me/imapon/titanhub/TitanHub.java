@@ -42,10 +42,12 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.weather.WeatherChangeEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.DisplaySlot;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
@@ -70,7 +72,8 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class TitanHub extends JavaPlugin implements Listener {
-    private static final String ITEM_MARKER_PREFIX = ChatColor.DARK_GRAY + "TitanHub:";
+    private static final long PVP_COMBAT_MILLIS = 10000L;
+    private static final long PVP_REENTRY_MILLIS = 3000L;
     private final Set<UUID> hiddenPlayers = new HashSet<UUID>();
     private final Map<UUID, Set<UUID>> hiddenByTitanHub = new HashMap<UUID, Set<UUID>>();
     private final Set<UUID> doubleJumpFlightEnabled = new HashSet<UUID>();
@@ -115,7 +118,6 @@ public final class TitanHub extends JavaPlugin implements Listener {
     private ItemStack navigatorDecorationItem;
     private List<Integer> navigatorDecorationSlots;
     private String profileTitleTemplate;
-    private String profileTitlePrefix;
     private int profileSize;
     private boolean clearInventoryOnJoin;
     private boolean navigatorEnabled;
@@ -141,8 +143,11 @@ public final class TitanHub extends JavaPlugin implements Listener {
     private List<String> tabHeader;
     private List<String> tabFooter;
     private boolean spawnOnJoin;
-    private Location hubLocation;
-    private World hubWorld;
+    // Only the world name is stored: the world may be loaded later by Multiverse or similar plugins.
+    private Location hubLocationTemplate;
+    private String hubWorldName;
+    private long refreshSeconds;
+    private BukkitTask refreshTask;
 
     @Override
     public void onEnable() {
@@ -150,14 +155,18 @@ public final class TitanHub extends JavaPlugin implements Listener {
         updateConfigDefaults();
         loadMessages();
         loadCache();
+        restartRefreshTask();
         getServer().getPluginManager().registerEvents(this, this);
         getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
         getCommand("titanhub").setExecutor((sender, command, label, args) -> {
             if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+                // Remove items matching the old names before they change, otherwise they stay in inventories.
+                for (Player online : Bukkit.getOnlinePlayers()) removeHubItems(online);
                 reloadConfig();
                 updateConfigDefaults();
                 loadMessages();
                 loadCache();
+                restartRefreshTask();
                 refreshOnlinePlayers();
                 sender.sendMessage(message("reload", sender instanceof Player ? (Player) sender : null));
                 return true;
@@ -172,7 +181,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
             }
             Player player = (Player) sender;
             if (!hubCommandEnabled) return true;
-            if (hubLocation == null) {
+            if (hubLocation() == null) {
                 player.sendMessage(message("hub-not-set", player));
                 return true;
             }
@@ -211,7 +220,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         event.setJoinMessage(message("join", player));
-        if (spawnOnJoin && hubLocation != null) {
+        if (spawnOnJoin && hubLocation() != null) {
             sendToHub(player, true);
             applyHiddenPlayersToJoiner(player);
             return;
@@ -238,6 +247,8 @@ public final class TitanHub extends JavaPlugin implements Listener {
         enderbuttCooldowns.remove(event.getPlayer().getUniqueId());
         playerHiderCooldowns.remove(event.getPlayer().getUniqueId());
         restoreHubItemsAfterDeath.remove(event.getPlayer().getUniqueId());
+        clearPvpState(event.getPlayer().getUniqueId());
+        pvpReentryCooldown.remove(event.getPlayer().getUniqueId());
     }
 
     @EventHandler
@@ -252,7 +263,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
         } else if (playerHiderEnabled && isHubItem(item, hiddenPlayers.contains(player.getUniqueId()) ? playerHiderHiddenItem : playerHiderVisibleItem, "player-hider")) {
             event.setCancelled(true);
             togglePlayers(player);
-        } else if (profileEnabled && (isHubItem(item, profileItem, "profile") || player.getInventory().getHeldItemSlot() == profileSlot)) {
+        } else if (profileEnabled && isHubItem(item, profileItem, "profile")) {
             event.setCancelled(true);
             openProfileNextTick(player);
         } else if (enderbuttEnabled && isHubItem(item, enderbuttItem, "enderbutt")) {
@@ -275,19 +286,10 @@ public final class TitanHub extends JavaPlugin implements Listener {
             event.setCancelled(true);
             return;
         }
-        if (profileEnabled && isHubWorld(player.getWorld()) && event.getClick().isRightClick()
-                && event.getRawSlot() >= event.getView().getTopInventory().getSize()
-                && (isHubItem(event.getCurrentItem(), profileItem, "profile") || event.getSlot() == profileSlot)) {
-            event.setCancelled(true);
-            openProfileNextTick(player);
-            return;
-        }
-        if (!profileTitlePrefix.isEmpty() && event.getView().getTitle().startsWith(profileTitlePrefix)) {
-            event.setCancelled(true);
-            return;
-        }
-        if (!event.getView().getTitle().equals(navigatorTitle)) return;
+        InventoryHolder holder = event.getView().getTopInventory().getHolder();
+        if (!(holder instanceof MenuHolder)) return;
         event.setCancelled(true);
+        if (((MenuHolder) holder).type != MenuType.NAVIGATOR) return;
         if (event.getRawSlot() < 0 || event.getRawSlot() >= event.getView().getTopInventory().getSize()) return;
         if (event.getCurrentItem() == null || !event.getCurrentItem().hasItemMeta()) return;
         Destination destination = destinations.get(event.getRawSlot());
@@ -299,7 +301,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
-        if (isManagedHubItem(event.getOldCursor())) event.setCancelled(true);
+        if (isManagedHubItem(event.getOldCursor()) || event.getView().getTopInventory().getHolder() instanceof MenuHolder) event.setCancelled(true);
     }
 
     @EventHandler
@@ -351,7 +353,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
                 event.setCancelled(true);
                 return;
             }
-            long until = System.currentTimeMillis() + 10000L;
+            long until = System.currentTimeMillis() + PVP_COMBAT_MILLIS;
             pvpCombatUntil.put(attacker.getUniqueId(), until);
             pvpCombatUntil.put(victim.getUniqueId(), until);
         }
@@ -374,6 +376,17 @@ public final class TitanHub extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
+        Player victim = event.getEntity();
+        if (pvpPlayers.contains(victim.getUniqueId())) {
+            // PvP gear must never be dropped in the hub; the player gets the hub items back on respawn.
+            event.getDrops().clear();
+            event.setDroppedExp(0);
+            if (event.getKeepInventory()) victim.getInventory().setArmorContents(null);
+            clearPvpState(victim.getUniqueId());
+            pvpReentryCooldown.put(victim.getUniqueId(), System.currentTimeMillis() + PVP_REENTRY_MILLIS);
+            restoreHubItemsAfterDeath.add(victim.getUniqueId());
+            return;
+        }
         boolean removedHubItem = false;
         for (java.util.Iterator<ItemStack> iterator = event.getDrops().iterator(); iterator.hasNext();) {
             if (isManagedHubItem(iterator.next())) {
@@ -387,6 +400,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
     @EventHandler
     public void onRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
+        Location hubLocation = hubLocation();
         if (hubLocation != null) event.setRespawnLocation(hubLocation);
         restoreHubItemsAfterDeath.remove(player.getUniqueId());
         Bukkit.getScheduler().runTask(this, () -> {
@@ -470,6 +484,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
     }
 
     private boolean sendToHub(Player player, boolean clearInventory) {
+        Location hubLocation = hubLocation();
         if (hubLocation == null || !player.teleport(hubLocation)) return false;
         refreshDoubleJump(player);
         giveHubItems(player, clearInventory);
@@ -483,7 +498,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
     }
 
     private void openNavigator(Player player) {
-        Inventory menu = Bukkit.createInventory(null, navigatorSize, navigatorTitle);
+        Inventory menu = Bukkit.createInventory(new MenuHolder(MenuType.NAVIGATOR), navigatorSize, navigatorTitle);
         if (navigatorDecorationEnabled && navigatorDecorationItem != null) {
             for (Integer slot : navigatorDecorationSlots) {
                 if (slot != null && slot >= 0 && slot < navigatorSize) menu.setItem(slot, navigatorDecorationItem.clone());
@@ -496,7 +511,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
     }
 
     private void openProfile(Player player) {
-        Inventory menu = Bukkit.createInventory(null, profileSize, profileTitle(player));
+        Inventory menu = Bukkit.createInventory(new MenuHolder(MenuType.PROFILE), profileSize, profileTitle(player));
         placeProfileItem(menu, "profile-menu.playtime", player, 10, "CLOCK", "&bTempo di gioco", "&7%playtime%");
         placeProfileItem(menu, "profile-menu.first-join", player, 12, "PLAYER_HEAD", "&aPrimo accesso", "&7%first-join%");
         placeProfileItem(menu, "profile-menu.last-join", player, 14, "BOOK", "&eUltimo accesso", "&7%last-join%");
@@ -555,7 +570,11 @@ public final class TitanHub extends JavaPlugin implements Listener {
 
     private void updateScoreboard(Player player) {
         if (!scoreboardEnabled) return;
-        Scoreboard board = Bukkit.getScoreboardManager().getNewScoreboard();
+        // Reuse the player's own board on refresh so it is not rebuilt from scratch every time.
+        Scoreboard board = player.getScoreboard();
+        if (board == null || board == Bukkit.getScoreboardManager().getMainScoreboard()) board = Bukkit.getScoreboardManager().getNewScoreboard();
+        Objective previous = board.getObjective("titanhub");
+        if (previous != null) previous.unregister();
         Objective objective = board.registerNewObjective("titanhub", "dummy");
         objective.setDisplayName(truncateLegacy(color(scoreboardTitle), 32));
         objective.setDisplaySlot(DisplaySlot.SIDEBAR);
@@ -673,7 +692,11 @@ public final class TitanHub extends JavaPlugin implements Listener {
     private void updateConfigDefaults() {
         try (InputStream resource = getResource("config.yml")) {
             if (resource != null) {
-                getConfig().setDefaults(YamlConfiguration.loadConfiguration(new InputStreamReader(resource, StandardCharsets.UTF_8)));
+                YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(resource, StandardCharsets.UTF_8));
+                // Destinations are user-owned: once the file has its own list, never re-add the example ones.
+                YamlConfiguration onDisk = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "config.yml"));
+                if (onDisk.isConfigurationSection("navigator.destinations")) defaults.set("navigator.destinations", null);
+                getConfig().setDefaults(defaults);
                 getConfig().options().copyDefaults(true);
                 saveConfig();
             }
@@ -684,12 +707,13 @@ public final class TitanHub extends JavaPlugin implements Listener {
         spawnOnJoin = getConfig().getBoolean("settings.spawn-on-join");
         ConfigurationSection hubSection = getConfig().getConfigurationSection("hub-location");
         if (hubSection != null && hubSection.isString("world")) {
-            hubWorld = Bukkit.getWorld(hubSection.getString("world"));
-            hubLocation = hubWorld == null ? null : new Location(hubWorld, hubSection.getDouble("x"), hubSection.getDouble("y"), hubSection.getDouble("z"), (float) hubSection.getDouble("yaw"), (float) hubSection.getDouble("pitch"));
+            hubWorldName = hubSection.getString("world");
+            hubLocationTemplate = new Location(null, hubSection.getDouble("x"), hubSection.getDouble("y"), hubSection.getDouble("z"), (float) hubSection.getDouble("yaw"), (float) hubSection.getDouble("pitch"));
         } else {
-            hubWorld = null;
-            hubLocation = null;
+            hubWorldName = null;
+            hubLocationTemplate = null;
         }
+        refreshSeconds = Math.max(0L, getConfig().getLong("settings.refresh-seconds", 5L));
         launchPadsEnabled = getConfig().getBoolean("launch-pads.enabled");
         doubleJumpEnabled = getConfig().getBoolean("double-jump.enabled");
         hubCommandEnabled = getConfig().getBoolean("settings.hub-command.enabled", true);
@@ -723,16 +747,15 @@ public final class TitanHub extends JavaPlugin implements Listener {
         if (decoration == null) navigatorDecorationItem.setDurability((short) 9);
         navigatorDecorationSlots = decoration == null ? defaultNavigatorDecorationSlots() : new ArrayList<Integer>(getConfig().getIntegerList("navigator.decoration.slots"));
         profileTitleTemplate = getConfig().getString("profile-menu.title", "&8Profilo: %player%");
-        profileTitlePrefix = color(profileTitleTemplate.replace("%player%", ""));
         profileSize = Math.max(9, Math.min(54, getConfig().getInt("profile-menu.size", 27)));
         profileSize -= profileSize % 9;
         navigatorEnabled = getConfig().getBoolean("items.navigator.enabled");
         playerHiderEnabled = getConfig().getBoolean("items.player-hider.enabled");
-        profileEnabled = false;
+        profileEnabled = getConfig().getBoolean("items.profile.enabled");
         navigatorSlot = getConfig().getInt("items.navigator.slot");
         playerHiderSlot = getConfig().getInt("items.player-hider.slot");
         profileSlot = getConfig().getInt("items.profile.slot");
-        enderbuttSlot = 8;
+        enderbuttSlot = getConfig().getInt("items.enderbutt.slot", 8);
         pvpEnabled = getConfig().getBoolean("items.pvp.enabled", true);
         pvpSlot = getConfig().getInt("items.pvp.slot", 1);
         navigatorItem = configuredItem("items.navigator", "material", "navigator");
@@ -766,7 +789,29 @@ public final class TitanHub extends JavaPlugin implements Listener {
     }
 
     private boolean isHubWorld(World world) {
-        return hubWorld != null && hubWorld.equals(world);
+        return hubWorldName != null && world != null && world.getName().equals(hubWorldName);
+    }
+
+    private Location hubLocation() {
+        if (hubWorldName == null || hubLocationTemplate == null) return null;
+        World world = Bukkit.getWorld(hubWorldName);
+        if (world == null) return null;
+        Location location = hubLocationTemplate.clone();
+        location.setWorld(world);
+        return location;
+    }
+
+    private void restartRefreshTask() {
+        if (refreshTask != null) refreshTask.cancel();
+        refreshTask = null;
+        if (refreshSeconds <= 0L || (!scoreboardEnabled && !tabEnabled)) return;
+        refreshTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                if (!isHubWorld(player.getWorld())) continue;
+                updateScoreboard(player);
+                updateTab(player);
+            }
+        }, refreshSeconds * 20L, refreshSeconds * 20L);
     }
 
     private ItemStack configuredItem(String path, String materialKey, String identifier) {
@@ -839,15 +884,9 @@ public final class TitanHub extends JavaPlugin implements Listener {
 
     private boolean isManagedHubItem(ItemStack item) {
         if (item == null) return false;
-        if (isHubItem(item, navigatorItem, "navigator") || isHubItem(item, playerHiderVisibleItem, "player-hider")
+        return isHubItem(item, navigatorItem, "navigator") || isHubItem(item, playerHiderVisibleItem, "player-hider")
                 || isHubItem(item, playerHiderHiddenItem, "player-hider") || isHubItem(item, profileItem, "profile")
-                || isHubItem(item, enderbuttItem, "enderbutt")) return true;
-        if (item.hasItemMeta() && item.getItemMeta().hasLore()) {
-            for (String line : item.getItemMeta().getLore()) {
-                if (line.startsWith(ITEM_MARKER_PREFIX)) return true;
-            }
-        }
-        return false;
+                || isHubItem(item, enderbuttItem, "enderbutt") || isHubItem(item, pvpItem, "pvp");
     }
 
     private void startPvpCountdown(Player player) {
@@ -877,10 +916,18 @@ public final class TitanHub extends JavaPlugin implements Listener {
             player.sendMessage(message("pvp-in-combat", player));
             return;
         }
-        pvpPlayers.remove(player.getUniqueId());
+        clearPvpState(player.getUniqueId());
+        pvpReentryCooldown.put(player.getUniqueId(), System.currentTimeMillis() + PVP_REENTRY_MILLIS);
         player.getInventory().setArmorContents(null);
         giveHubItems(player, false);
         player.sendMessage(message("pvp-disabled", player));
+    }
+
+    private void clearPvpState(UUID uuid) {
+        pvpPlayers.remove(uuid);
+        pvpCountdown.remove(uuid);
+        pvpExitCountdown.remove(uuid);
+        pvpCombatUntil.remove(uuid);
     }
 
     private void startPvpExit(Player player) {
@@ -1012,15 +1059,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
     private void removeHubItems(Player player) {
         ItemStack[] contents = player.getInventory().getContents();
         for (int slot = 0; slot < contents.length; slot++) {
-            ItemStack item = contents[slot];
-            if (item != null && item.hasItemMeta() && item.getItemMeta().hasLore()) {
-                for (String line : item.getItemMeta().getLore()) {
-                    if (line.startsWith(ITEM_MARKER_PREFIX)) {
-                        player.getInventory().setItem(slot, null);
-                        break;
-                    }
-                }
-            }
+            if (isManagedHubItem(contents[slot])) player.getInventory().setItem(slot, null);
         }
     }
 
@@ -1049,6 +1088,22 @@ public final class TitanHub extends JavaPlugin implements Listener {
             } catch (IllegalArgumentException ignoredAgain) {
                 return null;
             }
+        }
+    }
+
+    private enum MenuType { NAVIGATOR, PROFILE }
+
+    /** Identifies TitanHub menus by holder instead of title, so other plugins' inventories are never intercepted. */
+    private static final class MenuHolder implements InventoryHolder {
+        private final MenuType type;
+
+        private MenuHolder(MenuType type) {
+            this.type = type;
+        }
+
+        @Override
+        public Inventory getInventory() {
+            return null;
         }
     }
 
