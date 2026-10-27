@@ -1,6 +1,7 @@
 package me.imapon.titanhub;
 
 import me.imapon.titanhub.util.Text;
+import me.imapon.titanhub.util.Utf8Yaml;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -9,9 +10,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.lang.reflect.Method;
-import java.nio.charset.StandardCharsets;
 
 /** messages.yml plus placeholder handling (%player% and PlaceholderAPI when installed). */
 public final class Messages {
@@ -26,16 +25,18 @@ public final class Messages {
     public void load() {
         File file = new File(plugin.getDataFolder(), "messages.yml");
         if (!file.exists()) plugin.saveResource("messages.yml", false);
-        messages = YamlConfiguration.loadConfiguration(file);
+        YamlConfiguration loaded = Utf8Yaml.load(file);
+        if (Utf8Yaml.repairMojibake(loaded)) plugin.getLogger().info("Repaired special characters in messages.yml.");
+        messages = loaded;
         try (InputStream resource = plugin.getResource("messages.yml")) {
             if (resource != null) {
-                messages.setDefaults(YamlConfiguration.loadConfiguration(new InputStreamReader(resource, StandardCharsets.UTF_8)));
+                messages.setDefaults(Utf8Yaml.load(resource));
                 messages.options().copyDefaults(true);
-                try {
-                    messages.save(file);
-                } catch (IOException ignored) { }
+                Utf8Yaml.save(loaded, file);
             }
-        } catch (IOException ignored) { }
+        } catch (IOException exception) {
+            plugin.getLogger().warning("Cannot update messages.yml: " + exception.getMessage());
+        }
         placeholderMethod = null;
         if (!plugin.getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) return;
         try {

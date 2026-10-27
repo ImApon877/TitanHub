@@ -163,13 +163,23 @@ public final class PvpManager {
 
     private ItemStack gear(String material, boolean protection) {
         ItemStack item = new ItemStack(Items.materialByName(material));
-        if (protection) item.addUnsafeEnchantment(Enchantment.PROTECTION_ENVIRONMENTAL, 1);
+        if (protection) {
+            Enchantment enchantment = protectionEnchantment();
+            if (enchantment != null) item.addUnsafeEnchantment(enchantment, 1);
+        }
         try {
             ItemMeta meta = item.getItemMeta();
             ItemMeta.class.getMethod("setUnbreakable", boolean.class).invoke(meta, true);
             item.setItemMeta(meta);
         } catch (ReflectiveOperationException ignored) { }
         return item;
+    }
+
+    // PROTECTION_ENVIRONMENTAL was renamed to PROTECTION in 1.20.5.
+    @SuppressWarnings("deprecation")
+    private static Enchantment protectionEnchantment() {
+        Enchantment enchantment = Enchantment.getByName("PROTECTION_ENVIRONMENTAL");
+        return enchantment != null ? enchantment : Enchantment.getByName("PROTECTION");
     }
 
     private String message(String path, Player player) {

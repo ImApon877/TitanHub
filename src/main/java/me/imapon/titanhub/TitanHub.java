@@ -16,9 +16,11 @@ import me.imapon.titanhub.listener.PlayerListener;
 import me.imapon.titanhub.listener.ProtectionListener;
 import me.imapon.titanhub.menu.NavigatorMenu;
 import me.imapon.titanhub.menu.ProfileMenu;
+import me.imapon.titanhub.util.Utf8Yaml;
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabExecutor;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
@@ -27,8 +29,6 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 
 public final class TitanHub extends JavaPlugin {
     public static final String ADMIN_PERMISSION = "titanhub.admin";
@@ -43,6 +43,7 @@ public final class TitanHub extends JavaPlugin {
     private NavigatorMenu navigator;
     private ProfileMenu profile;
     private HubCommand hubCommand;
+    private YamlConfiguration config;
 
     @Override
     public void onEnable() {
@@ -144,6 +145,32 @@ public final class TitanHub extends JavaPlugin {
         return hubCommand;
     }
 
+    // config.yml is read and written as UTF-8 on every version (see Utf8Yaml).
+    @Override
+    public FileConfiguration getConfig() {
+        if (config == null) reloadConfig();
+        return config;
+    }
+
+    @Override
+    public void reloadConfig() {
+        config = Utf8Yaml.load(new File(getDataFolder(), "config.yml"));
+        try (InputStream defaults = getResource("config.yml")) {
+            if (defaults != null) config.setDefaults(Utf8Yaml.load(defaults));
+        } catch (IOException exception) {
+            getLogger().warning("Cannot read the default config.yml: " + exception.getMessage());
+        }
+    }
+
+    @Override
+    public void saveConfig() {
+        try {
+            Utf8Yaml.save((YamlConfiguration) getConfig(), new File(getDataFolder(), "config.yml"));
+        } catch (IOException exception) {
+            getLogger().severe("Cannot save config.yml: " + exception.getMessage());
+        }
+    }
+
     private void register(String name, TabExecutor executor) {
         PluginCommand command = getCommand(name);
         command.setExecutor(executor);
@@ -153,9 +180,9 @@ public final class TitanHub extends JavaPlugin {
     private void updateConfigDefaults() {
         try (InputStream resource = getResource("config.yml")) {
             if (resource != null) {
-                YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(resource, StandardCharsets.UTF_8));
+                YamlConfiguration defaults = Utf8Yaml.load(resource);
                 // Destinations are user-owned: once the file has its own list, never re-add the example ones.
-                YamlConfiguration onDisk = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "config.yml"));
+                YamlConfiguration onDisk = Utf8Yaml.load(new File(getDataFolder(), "config.yml"));
                 if (onDisk.isConfigurationSection("navigator.destinations")) defaults.set("navigator.destinations", null);
                 getConfig().setDefaults(defaults);
                 getConfig().options().copyDefaults(true);
