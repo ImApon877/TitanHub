@@ -51,6 +51,7 @@ import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.DisplaySlot;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Vector;
 
 import java.io.ByteArrayOutputStream;
@@ -63,6 +64,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -88,6 +90,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
     private final Map<UUID, Long> hubCooldowns = new HashMap<UUID, Long>();
     private final Map<UUID, Long> enderbuttCooldowns = new HashMap<UUID, Long>();
     private final Map<UUID, Long> playerHiderCooldowns = new HashMap<UUID, Long>();
+    private final Map<UUID, Scoreboard> ownScoreboards = new HashMap<UUID, Scoreboard>();
     private FileConfiguration messages;
     private Method placeholderMethod;
     private boolean hubCommandEnabled;
@@ -174,6 +177,11 @@ public final class TitanHub extends JavaPlugin implements Listener {
             sender.sendMessage(message("usage", sender instanceof Player ? (Player) sender : null));
             return true;
         });
+        getCommand("titanhub").setTabCompleter((sender, command, label, args) ->
+                args.length == 1 && sender.hasPermission("titanhub.admin") && "reload".startsWith(args[0].toLowerCase())
+                        ? Collections.singletonList("reload") : Collections.<String>emptyList());
+        getCommand("hub").setTabCompleter((sender, command, label, args) -> Collections.<String>emptyList());
+        getCommand("sethub").setTabCompleter((sender, command, label, args) -> Collections.<String>emptyList());
         getCommand("hub").setExecutor((sender, command, label, args) -> {
             if (!(sender instanceof Player)) {
                 sender.sendMessage(message("player-only", null));
@@ -249,6 +257,7 @@ public final class TitanHub extends JavaPlugin implements Listener {
         restoreHubItemsAfterDeath.remove(event.getPlayer().getUniqueId());
         clearPvpState(event.getPlayer().getUniqueId());
         pvpReentryCooldown.remove(event.getPlayer().getUniqueId());
+        ownScoreboards.remove(event.getPlayer().getUniqueId());
     }
 
     @EventHandler
@@ -571,8 +580,14 @@ public final class TitanHub extends JavaPlugin implements Listener {
     private void updateScoreboard(Player player) {
         if (!scoreboardEnabled) return;
         // Reuse the player's own board on refresh so it is not rebuilt from scratch every time.
+        Scoreboard main = Bukkit.getScoreboardManager().getMainScoreboard();
         Scoreboard board = player.getScoreboard();
-        if (board == null || board == Bukkit.getScoreboardManager().getMainScoreboard()) board = Bukkit.getScoreboardManager().getNewScoreboard();
+        if (board == null || board == main) {
+            board = Bukkit.getScoreboardManager().getNewScoreboard();
+            ownScoreboards.put(player.getUniqueId(), board);
+        }
+        // Boards created by TitanHub mirror the main scoreboard teams, so rank prefixes and nametags keep working.
+        if (board == ownScoreboards.get(player.getUniqueId())) syncTeams(main, board);
         Objective previous = board.getObjective("titanhub");
         if (previous != null) previous.unregister();
         Objective objective = board.registerNewObjective("titanhub", "dummy");
@@ -587,6 +602,28 @@ public final class TitanHub extends JavaPlugin implements Listener {
             objective.getScore(entry).setScore(score--);
         }
         player.setScoreboard(board);
+    }
+
+    private void syncTeams(Scoreboard source, Scoreboard target) {
+        for (Team copy : new ArrayList<Team>(target.getTeams())) {
+            if (source.getTeam(copy.getName()) == null) copy.unregister();
+        }
+        for (Team team : source.getTeams()) {
+            Team copy = target.getTeam(team.getName());
+            if (copy == null) copy = target.registerNewTeam(team.getName());
+            copy.setDisplayName(team.getDisplayName());
+            copy.setPrefix(team.getPrefix());
+            copy.setSuffix(team.getSuffix());
+            copy.setAllowFriendlyFire(team.allowFriendlyFire());
+            copy.setCanSeeFriendlyInvisibles(team.canSeeFriendlyInvisibles());
+            Set<String> entries = team.getEntries();
+            for (String entry : new ArrayList<String>(copy.getEntries())) {
+                if (!entries.contains(entry)) copy.removeEntry(entry);
+            }
+            for (String entry : entries) {
+                if (!copy.hasEntry(entry)) copy.addEntry(entry);
+            }
+        }
     }
 
     private ItemStack item(String materialPath, String name, List<String> lore) {
@@ -856,9 +893,18 @@ public final class TitanHub extends JavaPlugin implements Listener {
     private String formatMenuText(Player player, String value) {
         return format(player, value)
                 .replace("%online%", String.valueOf(Bukkit.getOnlinePlayers().size()))
-                .replace("%playtime%", formatPlaytime(player.getStatistic(Statistic.PLAY_ONE_TICK)))
+                .replace("%playtime%", formatPlaytime(player.getStatistic(playtimeStatistic())))
                 .replace("%first-join%", formatDate(player.getFirstPlayed()))
                 .replace("%last-join%", formatDate(player.getLastPlayed()));
+    }
+
+    // Renamed from PLAY_ONE_TICK to PLAY_ONE_MINUTE in 1.13 (it still counts ticks).
+    private Statistic playtimeStatistic() {
+        try {
+            return Statistic.valueOf("PLAY_ONE_MINUTE");
+        } catch (IllegalArgumentException ignored) {
+            return Statistic.valueOf("PLAY_ONE_TICK");
+        }
     }
 
     private String formatDate(long time) {
@@ -1007,9 +1053,22 @@ public final class TitanHub extends JavaPlugin implements Listener {
     }
 
     private void refreshDoubleJump(Player player) {
-        if (!doubleJumpEnabled || !isHubWorld(player.getWorld()) || player.getGameMode() == GameMode.CREATIVE || !player.isOnGround() || player.getAllowFlight()) return;
+        if (!doubleJumpEnabled || !isHubWorld(player.getWorld()) || player.getGameMode() == GameMode.CREATIVE || player.getAllowFlight()) return;
+        // isOnGround() comes from the client and can be spoofed for infinite double jumps: also check the block below.
+        if (!player.isOnGround() || !isStandingOnSolidBlock(player)) return;
         player.setAllowFlight(true);
         doubleJumpFlightEnabled.add(player.getUniqueId());
+    }
+
+    private boolean isStandingOnSolidBlock(Player player) {
+        Location feet = player.getLocation();
+        double[] offsets = {-0.3D, 0.3D};
+        for (double x : offsets) {
+            for (double z : offsets) {
+                if (feet.clone().add(x, -0.1D, z).getBlock().getType().isSolid()) return true;
+            }
+        }
+        return false;
     }
 
     private void revokeDoubleJumpFlight(Player player) {
