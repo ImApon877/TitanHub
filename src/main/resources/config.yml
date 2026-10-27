@@ -12,6 +12,8 @@ settings:
   prevent-block-place: true
   prevent-interactions: true
   prevent-weather: true
+  # Ogni quanti secondi aggiornare scoreboard e tab (0 = mai).
+  refresh-seconds: 5
   scoreboard:
     enabled: true
     title: '&8[&bTitan&3Hub&8]'

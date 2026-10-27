@@ -1,9 +1,10 @@
 name: TitanHub
 version: 1.0.0
 main: me.imapon.titanhub.TitanHub
+api-version: '1.13'
 author: Im_Apon
 description: Configurable cross-version hub core.
-softdepend: [PlaceholderAPI]
+softdepend: [PlaceholderAPI, Multiverse-Core]
 commands:
   titanhub:
     description: Reload TitanHub configuration.
