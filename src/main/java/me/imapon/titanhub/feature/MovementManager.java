@@ -6,6 +6,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Sound;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerToggleFlightEvent;
@@ -33,8 +34,15 @@ public final class MovementManager {
         HubSettings settings = plugin.settings();
         refreshDoubleJump(player);
         if (!settings.launchPadsEnabled || !settings.isHubWorld(player.getWorld()) || sameBlock(event)) return;
-        if (event.getTo().getBlock().getRelative(0, -1, 0).getType() != settings.launchPadMaterial || !launchPadCooldown.add(player.getUniqueId())) return;
-        player.setVelocity(new Vector(player.getVelocity().getX() * settings.launchPadStrength, settings.launchPadVerticalBoost, player.getVelocity().getZ() * settings.launchPadStrength));
+        // A pressure plate is in the block of the player's feet; a full block pad is the block below.
+        Block feet = event.getTo().getBlock();
+        if (feet.getType() != settings.launchPadMaterial && feet.getRelative(0, -1, 0).getType() != settings.launchPadMaterial) return;
+        if (!launchPadCooldown.add(player.getUniqueId())) return;
+        // The server does not know the player's walking speed (getVelocity() is ~0), so launch where they look.
+        Vector velocity = player.getLocation().getDirection().setY(0);
+        if (velocity.lengthSquared() > 0) velocity.normalize().multiply(settings.launchPadStrength);
+        velocity.setY(settings.launchPadVerticalBoost);
+        player.setVelocity(velocity);
         play(player, settings.launchPadSound);
         Bukkit.getScheduler().runTaskLater(plugin, () -> launchPadCooldown.remove(player.getUniqueId()), 10L);
     }
@@ -44,7 +52,8 @@ public final class MovementManager {
         Player player = event.getPlayer();
         HubSettings settings = plugin.settings();
         if (!settings.doubleJumpEnabled || !settings.isHubWorld(player.getWorld()) || player.getGameMode() == GameMode.CREATIVE) return;
-        if (!doubleJumpFlightEnabled.contains(player.getUniqueId())) return;
+        // Only the attempt to start flying is the second jump; stopping a real flight is left alone.
+        if (!event.isFlying() || !doubleJumpFlightEnabled.contains(player.getUniqueId())) return;
         event.setCancelled(true);
         player.setAllowFlight(false);
         doubleJumpFlightEnabled.remove(player.getUniqueId());
@@ -56,6 +65,8 @@ public final class MovementManager {
 
     public void refreshDoubleJump(Player player) {
         HubSettings settings = plugin.settings();
+        // Flying for real means another plugin (e.g. /fly) took over flight: stop treating it as a double jump.
+        if (player.isFlying()) doubleJumpFlightEnabled.remove(player.getUniqueId());
         if (!settings.doubleJumpEnabled || !settings.isHubWorld(player.getWorld()) || player.getGameMode() == GameMode.CREATIVE || player.getAllowFlight()) return;
         // isOnGround() comes from the client and can be spoofed for infinite double jumps: also check the block below.
         if (!player.isOnGround() || !isStandingOnSolidBlock(player)) return;

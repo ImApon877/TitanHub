@@ -30,7 +30,14 @@ public final class ProtectionListener implements Listener {
 
     @EventHandler
     public void onDamage(EntityDamageEvent event) {
+        if (isAlwaysAllowed(event.getCause())) return;
         if (settings().preventDamage && event.getEntity() instanceof Player && inHub(event.getEntity().getWorld()) && !plugin.pvp().isMutualPvpDamage(event)) event.setCancelled(true);
+    }
+
+    // Falling into the void and /kill must still work, otherwise players fall forever. KILL exists only on modern versions.
+    private static boolean isAlwaysAllowed(EntityDamageEvent.DamageCause cause) {
+        String name = cause.name();
+        return name.equals("VOID") || name.equals("KILL") || name.equals("SUICIDE");
     }
 
     @EventHandler

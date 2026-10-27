@@ -25,6 +25,8 @@ public final class SetHubCommand implements TabExecutor {
         }
         Player player = (Player) sender;
         Location location = player.getLocation();
+        // Re-read the file first, so edits made to config.yml since the last reload are not overwritten.
+        plugin.reloadConfig();
         plugin.getConfig().set("hub-location.world", location.getWorld().getName());
         plugin.getConfig().set("hub-location.x", location.getX());
         plugin.getConfig().set("hub-location.y", location.getY());
