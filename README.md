@@ -2,6 +2,25 @@
 
 Hub core configurabile per server Bukkit, Spigot e Paper. TitanHub gestisce hotbar, navigatore modalita, protezioni hub, doppio salto, launch pad, Enderbutt, PvP controllato, scoreboard, tablist e collegamenti a proxy o comandi esterni.
 
+## Download
+
+Scarica l'ultima versione dalla pagina [Releases](https://github.com/ImApon877/TitanHub/releases/latest) (`TitanHub.jar`).
+
+## Novita nella 1.1.0
+
+Versione provata con giocatori bot su Paper 1.8.8 e 1.21.11 (34/34 controlli superati su entrambe).
+
+- **Launch pad**: ora funzionano (prima non partivano mai) e spingono nella direzione in cui guarda il giocatore.
+- **Vuoto e /kill**: con `prevent-damage` un giocatore che cadeva nel vuoto dell'hub cadeva per sempre; ora muore e rinasce all'hub.
+- **PvP**: stato azzerato a uscita e morte, l'equipaggiamento PvP non cade mai a terra, cooldown di rientro di 3 secondi.
+- **Doppio salto**: controllato lato server e non interferisce piu con il volo dato da altri plugin (es. `/fly`).
+- **`/sethub`** non cancella piu le modifiche fatte a mano a `config.yml`.
+- **Navigatore**: le destinazioni cancellate non vengono piu ricreate; i menu di altri plugin con lo stesso titolo non vengono piu bloccati.
+- **Mondo dell'hub** caricato anche se arriva dopo (Multiverse).
+- **Scoreboard e tab** aggiornati ogni `settings.refresh-seconds` secondi; i prefissi dei rank restano visibili.
+- **Caratteri speciali**: i file `.yml` sono letti e scritti in UTF-8 (su 1.8 sotto Windows si rovinavano) e vengono riparati in automatico.
+- `items.profile.enabled` e `items.enderbutt.slot` ora funzionano; tab-complete per `/titanhub`, `/hub` e `/sethub`.
+
 ## Compatibilita
 
 - Bukkit, Spigot e Paper dalla 1.8.8 alle versioni moderne.
@@ -218,11 +237,17 @@ Il plugin compilato viene creato in `target/TitanHub.jar`.
 
 ```text
 TitanHub/
-├── src/main/java/me/imapon/titanhub/TitanHub.java
-├── src/main/resources/config.yml
-├── src/main/resources/messages.yml
-├── src/main/resources/plugin.yml
-├── pom.xml
-├── README.md
-└── .gitignore
+├── src/main/java/me/imapon/titanhub/
+│   ├── TitanHub.java            plugin principale: avvio, reload, collegamenti
+│   ├── Messages.java            messages.yml e placeholder
+│   ├── config/                  HubSettings (config.yml), Destination
+│   ├── feature/                 HubItems, PlayerHider, PvpManager, MovementManager,
+│   │                            DisplayManager (scoreboard e tab), HubTeleporter
+│   ├── menu/                    NavigatorMenu, ProfileMenu, MenuHolder
+│   ├── command/                 TitanHubCommand, HubCommand, SetHubCommand
+│   ├── listener/                PlayerListener, HubItemListener, MovementListener, ProtectionListener
+│   └── util/                    Items, Text, Utf8Yaml
+├── src/main/resources/          config.yml, messages.yml, plugin.yml
+├── .github/workflows/build.yml  compila e allega il JAR alle release v*
+└── pom.xml
 ```
